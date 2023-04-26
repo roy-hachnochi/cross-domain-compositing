@@ -43,7 +43,7 @@ conda install -c conda-forge trimesh
 conda install -c conda-forge natsort
 pip install PyMCubes
 ```
-Note that these are needed only if intended to run SVR.
+Note that these are needed only if intended to run SVR.  
 3. Add submodules path and set PYTHONPATH to point to the root of the repository (we used [ResizeRight](https://github.com/assafshocher/ResizeRight.git) for image resizing):
 ```
 export PYTHONPATH=$PYTHONPATH:$(pwd):$(pwd)/ResizeRight
@@ -136,6 +136,10 @@ Follow the steps below to test and evaluate in-the-wild images.:
 3. Run `python ./SVR/blender_render_trans_bg.py` to render the reconstructed model under the predicted camera pose. Remember to specify the input/output paths. We used blender 3.4.1 python API to run this script.
 4. Extract the reference mask of the input images, we used [U^2Net](https://github.com/xuebinqin/U-2-Net). Save the folder of extracted reference masks in `./SVR/result`.
 5. Run `python ./SVR/eval/eval_2D_iou.py` to evaluate 2D-IOU on in the wild images. Remember to specify the input/output paths.
+
+## Data
+
+We manually collected and created 24 scribble examples + masks, and 45 immersion examples + masks, in [this link](https://drive.google.com/drive/folders/1tgm4nG_SnUlo7dHCuvwRWKzJDqNiaSN0?usp=sharing).
 
 ## Results
 
