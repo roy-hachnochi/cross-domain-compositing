@@ -14,10 +14,11 @@ from contextlib import nullcontext
 from pytorch_lightning import seed_everything
 
 from ldm.models.diffusion.ddim import DDIMSampler
-from scripts_cdc.img2img_utils import create_argparser, chunk, load_img, load_mask, load_model_from_config
+from scripts_cdc.img2img_utils import create_argparser, chunk, load_img, load_mask, load_model_from_config, Preprocess
 from cdc.prompt_masking import masked_cross_attention
 
-def load_data(img_path, mask_path, prompt_path, max_imgs, default_prompt, batch_size, mask_dilate, image_size=None, shadow=False):
+def load_data(img_path, mask_path, prompt_path, max_imgs, default_prompt, batch_size, mask_dilate,
+              preprocessor=Preprocess(), image_size=None, shadow=False):
     print(f"reading images from {img_path}")
     im_list = [os.path.join(img_path, filename) for filename in sorted(os.listdir(img_path))] if os.path.isdir(
         img_path) else [img_path]
@@ -51,6 +52,8 @@ def load_data(img_path, mask_path, prompt_path, max_imgs, default_prompt, batch_
         if i % batch_size == 0 or i == n_imgs:
             img = torch.concat(img, dim=0)
             mask = torch.concat(mask, dim=0) if mask_path is not None else None
+            if mask is not None:
+                img, mask = preprocessor.crop(img, mask)
             prompt = prompts[b]
             yield img, mask, prompt, filename
             img, mask, filename = [], [], []
@@ -109,15 +112,17 @@ def main():
         for param, val in prod:
             sampling_conf[param] = val
 
+        preprocessor = Preprocess(sampling_conf.crop_mask, sampling_conf.crop_scale, sampling_conf.image_size)
         data_loader = load_data(sampling_conf.init_img, sampling_conf.mask, sampling_conf.from_file,
                                 sampling_conf.max_imgs, sampling_conf.prompt, sampling_conf.batch_size,
-                                sampling_conf.mask_dilate, sampling_conf.image_size, sampling_conf.shadow)
+                                sampling_conf.mask_dilate, preprocessor, sampling_conf.image_size, sampling_conf.shadow)
 
         sample_path = os.path.join(outpath, '_'.join([str(val).replace('_', '') for element in prod for val in element]))
         os.makedirs(sample_path, exist_ok=True)
         OmegaConf.save(config, os.path.join(sample_path, 'config.yaml'))
 
-        assert 0. <= sampling_conf.strength <= 1., 'can only work with strength in [0.0, 1.0]'
+        assert 0. <= sampling_conf.strength_in <= 1., 'can only work with strength in [0.0, 1.0]'
+        assert (sampling_conf.strength_out is None) or (0. <= sampling_conf.strength_out <= 1.), 'can only work with strength in [0.0, 1.0]'
         sampler.make_schedule(ddim_num_steps=sampling_conf.ddim_steps, ddim_eta=sampling_conf.ddim_eta, verbose=False)
         repaint_conf = OmegaConf.create({'use_repaint': sampling_conf.repaint_start > 0,
                                          'inpa_inj_time_shift': 1,
@@ -159,11 +164,18 @@ def main():
 
                         for n in trange(sampling_conf.n_samples, desc="Sampling"):
                             # encode (scaled latent)
-                            t_enc = int(sampling_conf.strength * sampling_conf.ddim_steps)
-                            if t_enc < sampling_conf.ddim_steps:
-                                z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc] * batch_size).to(device))
+                            t_enc_in = int(sampling_conf.strength_in * sampling_conf.ddim_steps)
+                            if t_enc_in < sampling_conf.ddim_steps:
+                                z_enc_in = sampler.stochastic_encode(init_latent, torch.tensor([t_enc_in] * batch_size).to(device))
                             else:  # strength >= 1 ==> use only noise
-                                z_enc = torch.randn_like(init_latent)
+                                z_enc_in = torch.randn_like(init_latent)
+                            t_enc_out = int(sampling_conf.strength_out * sampling_conf.ddim_steps) if sampling_conf.strength_out is not None else t_enc_in
+                            if t_enc_out < sampling_conf.ddim_steps:
+                                z_enc_out = sampler.stochastic_encode(init_latent, torch.tensor([t_enc_out] * batch_size).to(device))
+                            else:  # strength >= 1 ==> use only noise
+                                z_enc_out = torch.randn_like(init_latent)
+                            z_enc = latent_mask * z_enc_in + (1 - latent_mask) * z_enc_out if latent_mask is not None else z_enc_in
+                            t_enc = max(t_enc_in, t_enc_out)
 
                             # decode it
                             samples = sampler.decode(z_enc, c, t_enc,
@@ -176,13 +188,14 @@ def main():
                                                      repaint=repaint_conf, ilvr_x0=sampling_conf.ilvr_x0)
 
                             x_samples = model.decode_first_stage(samples)
+                            x_samples = preprocessor.paste(x_samples)
                             x_samples = torch.clamp((x_samples + 1.0) / 2.0, min=0.0, max=1.0)
 
                             if not sampling_conf.skip_save:
                                 for i, x_sample in enumerate(x_samples):
                                     x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
                                     Image.fromarray(x_sample.astype(np.uint8)).save(
-                                        os.path.join(sample_path, f"{filename[i]}_{n:02}.png"))
+                                        os.path.join(sample_path, f"{filename[i]}_{n:02}.jpg"))
                             all_samples.append(x_samples)
 
                     if not sampling_conf.skip_grid:
@@ -192,7 +205,7 @@ def main():
 
                         # to image
                         grid = 255. * rearrange(grid, 'c h w -> h w c').cpu().numpy()
-                        Image.fromarray(grid.astype(np.uint8)).save(os.path.join(sample_path, f'grid-{grid_count:04}.png'))
+                        Image.fromarray(grid.astype(np.uint8)).save(os.path.join(sample_path, f'grid-{grid_count:04}.jpg'))
                         grid_count += 1
 
                     print(f"finished {exp_i + 1}/{n_exp} experiments")
@@ -205,7 +218,7 @@ def main():
         os.makedirs(mask_dir, exist_ok=True)
         data_loader = load_data(sampling_conf.init_img, sampling_conf.mask, sampling_conf.from_file,
                                 sampling_conf.max_imgs, sampling_conf.prompt, sampling_conf.batch_size, 0,
-                                sampling_conf.image_size, sampling_conf.shadow)
+                                image_size=sampling_conf.image_size, shadow=sampling_conf.shadow)
         for img, mask, prompts, filename in tqdm(data_loader, desc="Data"):
             for i, x_img in enumerate(img):
                 x_img = 255. * (x_img.permute(1, 2, 0).cpu().numpy() + 1.) / 2.

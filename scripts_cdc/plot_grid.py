@@ -25,7 +25,7 @@ ignore = ['Tin_0.4', 'Tin_0.5', 'Tin_0.7']
 im_i = 0
 # ======================================================================================================================
 
-out_filename = f"summary_{im_i}.jpg" if (const_axes is None) or len(const_axes) == 0 else f"summary_{'_'.join(const_axes)}_{im_i}.jpg"
+out_filename = f"summary_{im_i}.jpg" if (const_axes is None) or len(const_axes) == 0 else f"summary_{im_i}_{'_'.join(const_axes)}.jpg"
 out_filename = os.path.join(im_dir, out_filename)
 const_axes += [col_axis, row_axis]
 
@@ -34,7 +34,7 @@ im_list = {}
 for subdir in os.listdir(im_dir):
     if check_experiment(subdir, im_dir, const_axes, ignore):
         files = sorted(os.listdir(os.path.join(im_dir, subdir)))
-        files = list(filter(lambda f: ".png" in f, files))
+        files = list(filter(lambda f: ".png" in f or ".jpg" in f, files))
         x = float(subdir.split(row_axis)[1].split('_')[1]) if row_axis else 0
         y = float(subdir.split(col_axis)[1].split('_')[1]) if col_axis else 0
         if x not in im_list:

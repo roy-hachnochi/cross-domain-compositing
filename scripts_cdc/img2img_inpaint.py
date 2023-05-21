@@ -192,10 +192,10 @@ def img_inpaint(config, model, sampler, img_res = 512, need_index = True):
                                     x_sample = 255. * rearrange(x_sample.cpu().numpy(), 'c h w -> h w c')
                                     if need_index:
                                         Image.fromarray(x_sample.astype(np.uint8)).resize((img_res, img_res)).save(
-                                            os.path.join(sample_path, f"{filename[i]}_{n:02}.png"))
+                                            os.path.join(sample_path, f"{filename[i]}_{n:02}.jpg"))
                                     else:
                                         Image.fromarray(x_sample.astype(np.uint8)).resize((img_res, img_res)).save(
-                                            os.path.join(sample_path, f"{filename[i]}.png"))
+                                            os.path.join(sample_path, f"{filename[i]}.jpg"))
                             all_samples.append(x_samples)
 
                     if not sampling_conf.skip_grid:
@@ -205,7 +205,7 @@ def img_inpaint(config, model, sampler, img_res = 512, need_index = True):
 
                         # to image
                         grid = 255. * rearrange(grid, 'c h w -> h w c').cpu().numpy()
-                        Image.fromarray(grid.astype(np.uint8)).save(os.path.join(sample_path, f'grid-{grid_count:04}.png'))
+                        Image.fromarray(grid.astype(np.uint8)).save(os.path.join(sample_path, f'grid-{grid_count:04}.jpg'))
                         grid_count += 1
 
                     print(f"finished {exp_i + 1}/{n_exp} experiments")

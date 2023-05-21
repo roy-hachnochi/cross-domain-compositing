@@ -157,11 +157,17 @@ def create_argparser():
         help="unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))",
     )
     parser.add_argument(
-        "--strength",
+        "--strength_in",
         type=float,
         nargs='*',
         default=1.0,
-        help="strength for noising/unnoising. 1.0 corresponds to full destruction of information in init image",
+        help="strength for noising/unnoising inside mask. 1.0 corresponds to full destruction of information in init image",
+    )
+    parser.add_argument(
+        "--strength_out",
+        type=float,
+        nargs='*',
+        help="strength for noising/unnoising outside mask. 1.0 corresponds to full destruction of information in init image",
     )
 
     parser.add_argument(
@@ -234,6 +240,24 @@ def create_argparser():
         "--shadow",
         action='store_true',
         help="adjust mask for shadow generation",
+    )
+    parser.add_argument(
+        "--crop_mask",
+        action='store_true',
+        help="work only on cropped bounding box around mask",
+    )
+    parser.add_argument(
+        "--crop_scale",
+        type=float,
+        nargs='*',
+        default=1,
+        help="scale size of cropped bounding box, (e.g 1 for tight BB, 2 for BB twice as large)",
+    )
+    parser.add_argument(
+        "--crop_size",
+        type=float,
+        default=512,
+        help="will resize the cropped area around mask",
     )
 
     parser.add_argument(
@@ -324,3 +348,66 @@ def add_shadow(mask, width=30):
         l, r = max(l - width, 0), min(r + width, mask.shape[1])
         shadow_mask[u:d, l:r] = object_val
     return shadow_mask
+
+class Preprocess:
+    def __init__(self, crop=False, scale=1., size=512):
+        self.is_crop = crop
+        self.scale = scale
+        self.size = size
+        self.bb = (0, 0, self.size, self.size)
+        self.im = None
+        self.orig_size = (0, 0)
+
+    def crop(self, im, mask):
+        if self.is_crop:
+            self.im = im.clone()
+            indices = np.where(mask)
+            self.bb = (indices[2].min(), indices[3].min(), indices[2].max(), indices[3].max())
+            x_pad, y_pad = int((self.bb[3] - self.bb[1]) * (self.scale - 1) / 2), int((self.bb[2] - self.bb[0]) * (self.scale - 1) / 2)
+            self.bb = (self.bb[0] - y_pad, self.bb[1] - x_pad, self.bb[2] + y_pad, self.bb[3] + x_pad)
+            self.bb = (max(0, self.bb[0]), max(0, self.bb[1]), min(mask.shape[2], self.bb[2]), min(mask.shape[3], self.bb[3]))
+            self.bb = self._round(self.bb, mask.shape[2:])
+            mask = mask[:, :, self.bb[0]:self.bb[2], self.bb[1]:self.bb[3]]
+            im = im[:, :, self.bb[0]:self.bb[2], self.bb[1]:self.bb[3]]
+        self.orig_size = im.shape[2:]
+        if self.size is not None:
+            im = torch.nn.functional.interpolate(im, size=(self.size, self.size), mode='bicubic').to(im.device)
+            mask = torch.nn.functional.interpolate(mask, size=(self.size, self.size), mode='nearest').to(mask.device)
+        return im, mask
+
+    def paste(self, im):
+        im = torch.nn.functional.interpolate(im, size=self.orig_size, mode='bicubic').to(im.device)
+        if self.is_crop:
+            im_new = self.im
+            im_new[:, :, self.bb[0]:self.bb[2], self.bb[1]:self.bb[3]] = im
+            im = im_new.clone()
+        return im
+
+    def _round(self, bb, bound, r=64):
+        bb_new = list(bb)
+        x0, y0 = bb_new[0], bb_new[1]
+        bb_new[0] = bb_new[0] - x0
+        bb_new[1] = bb_new[1] - y0
+        bb_new[2] = bb_new[2] - x0
+        bb_new[3] = bb_new[3] - y0
+        if bb_new[2] + r - bb_new[2] % r <= bound[0] - x0:
+            bb_new[2] = bb_new[2] + r - bb_new[2] % r
+        elif bb_new[0] - (r - bb_new[2] % r) >= -1 * x0:
+            bb_new[0] = bb_new[0] - (r - bb_new[2] % r)
+        else:
+            bb_new[0] = -1 * x0
+            bb_new[2] = bb_new[2] - x0 + r - bb_new[2] % r
+        if bb_new[3] + r - bb_new[3] % r <= bound[1] - y0:
+            bb_new[3] = bb_new[3] + r - bb_new[3] % r
+        elif bb_new[1] - (r - bb_new[3] % r) >= -1 * y0:
+            bb_new[1] = bb_new[1] - (r - bb_new[3] % r)
+        else:
+            bb_new[1] = -1 * y0
+            bb_new[3] = bb_new[3] - y0 + r - bb_new[3] % r
+        bb_new[0] = bb_new[0] + x0
+        bb_new[1] = bb_new[1] + y0
+        bb_new[2] = bb_new[2] + x0
+        bb_new[3] = bb_new[3] + y0
+        return tuple(bb_new)
+
+

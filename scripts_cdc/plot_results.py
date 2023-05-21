@@ -9,18 +9,22 @@ def image_grid(imgs, rows, cols):
         grid.paste(img, box=(i % cols * w, i // cols * h))
     return grid
 
-def check_experiment(exp_name, path, const_axes):
+def check_experiment(exp_name, path, const_axes=None, ignore=None):
     if not os.path.isdir(os.path.join(path, exp_name)):
         return False
-    return (const_axes is None) or (len(const_axes) == 0) or all([name in subdir for name in const_axes])
+    if not ((const_axes is None) or (len(const_axes) == 0) or all([name in subdir for name in const_axes])):
+        return False
+    return (ignore is None) or (len(ignore) == 0) or all([name not in subdir for name in ignore])
 
 # ======================================================================================================================
 import numpy as np
 im_dir = "/disk2/royha/temp_scribbles"
 # im_dir = "/disk2/royha/stable-diffusion/outputs/style_blending/all_user_study"
 const_axes = ['results']
+ignore = []
 size = 512
 images = np.arange(8)
+transpose = True
 # ======================================================================================================================
 
 out_filename = f"summary.jpg" if (const_axes is None) or len(const_axes) == 0 else f"summary_{'_'.join(const_axes)}.jpg"
@@ -29,7 +33,7 @@ out_filename = os.path.join(im_dir, out_filename)
 # load images
 im_list = {}
 for subdir in os.listdir(im_dir):
-    if check_experiment(subdir, im_dir, const_axes):
+    if check_experiment(subdir, im_dir, const_axes, ignore):
         files = os.listdir(os.path.join(im_dir, subdir))
         files = list(filter(lambda f: (".png" in f) or (".jpg" in f), files))
         im_list[subdir] = []
@@ -38,10 +42,16 @@ for subdir in os.listdir(im_dir):
 
 # make grid
 imgs = []
-for i in images:
+if transpose:
     for key in reversed(sorted(im_list.keys())):
-        imgs.append(im_list[key][i])
-grid = image_grid(imgs, 1, 8)
+        for i in images:
+            imgs.append(im_list[key][i])
+    grid = image_grid(imgs, len(im_list), len(images))
+else:
+    for i in images:
+        for key in sorted(im_list.keys()):
+            imgs.append(im_list[key][i])
+    grid = image_grid(imgs, len(images), len(im_list))
 grid.save(out_filename)
 
 # fig, axes = plt.subplots(n_images, len(im_list))
