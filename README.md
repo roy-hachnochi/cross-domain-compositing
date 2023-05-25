@@ -141,6 +141,10 @@ Follow the steps below to test and evaluate in-the-wild images.:
 
 We manually collected and created 24 scribble examples + masks, and 45 immersion examples + masks, in [this link](https://drive.google.com/drive/folders/1tgm4nG_SnUlo7dHCuvwRWKzJDqNiaSN0?usp=sharing).
 
+## Updates
+
+**23/05/2023:** Added mitigation for small objects. Use new parameters `--crop_mask`, `--crop_scale`[float], `--crop_size`[int] to apply CDC on a small, upscaled, bounding box around the object.
+
 ## Results
 
 #### Image Modification via Scribbles

@@ -255,7 +255,7 @@ def create_argparser():
     )
     parser.add_argument(
         "--crop_size",
-        type=float,
+        type=int,
         default=512,
         help="will resize the cropped area around mask",
     )
