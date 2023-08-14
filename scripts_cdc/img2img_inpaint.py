@@ -122,7 +122,8 @@ def img_inpaint(config, model, sampler, img_res = 512, need_index = True):
         os.makedirs(sample_path, exist_ok=True)
         OmegaConf.save(config, os.path.join(sample_path, 'config.yaml'))
 
-        assert 0. <= sampling_conf.strength <= 1., 'can only work with strength in [0.0, 1.0]'
+        assert 0. <= sampling_conf.strength_in <= 1., 'can only work with strength in [0.0, 1.0]'
+        assert (sampling_conf.strength_out is None) or (0. <= sampling_conf.strength_out <= 1.), 'can only work with strength in [0.0, 1.0]'
         sampler.make_schedule(ddim_num_steps=sampling_conf.ddim_steps, ddim_eta=sampling_conf.ddim_eta, verbose=False)
         repaint_conf = OmegaConf.create({'use_repaint': sampling_conf.repaint_start > 0,
                                          'inpa_inj_time_shift': 1,
@@ -168,11 +169,21 @@ def img_inpaint(config, model, sampler, img_res = 512, need_index = True):
 
                         for n in trange(sampling_conf.n_samples, desc="Sampling"):
                             # encode (scaled latent)
-                            t_enc = int(sampling_conf.strength * sampling_conf.ddim_steps)
-                            if t_enc < sampling_conf.ddim_steps:
-                                z_enc = sampler.stochastic_encode(init_latent, torch.tensor([t_enc] * batch_size).to(device))
+                            t_enc_in = int(sampling_conf.strength_in * sampling_conf.ddim_steps)
+                            if t_enc_in < sampling_conf.ddim_steps:
+                                z_enc_in = sampler.stochastic_encode(init_latent,
+                                                                     torch.tensor([t_enc_in] * batch_size).to(device))
                             else:  # strength >= 1 ==> use only noise
-                                z_enc = torch.randn_like(init_latent)
+                                z_enc_in = torch.randn_like(init_latent)
+                            t_enc_out = int(sampling_conf.strength_out * sampling_conf.ddim_steps) if sampling_conf.strength_out is not None else t_enc_in
+                            if t_enc_out < sampling_conf.ddim_steps:
+                                z_enc_out = sampler.stochastic_encode(init_latent,
+                                                                      torch.tensor([t_enc_out] * batch_size).to(device))
+                            else:  # strength >= 1 ==> use only noise
+                                z_enc_out = torch.randn_like(init_latent)
+                            z_enc = latent_mask * z_enc_in + (
+                                        1 - latent_mask) * z_enc_out if latent_mask is not None else z_enc_in
+                            t_enc = max(t_enc_in, t_enc_out)
 
                             # decode it
                             samples = sampler.decode(z_enc, c, t_enc,
